@@ -1,0 +1,21 @@
+# Ambiente virtual
+.venv/
+
+# Dataset
+datasets/
+
+# Resultados dos treinamentos
+runs/
+
+# Imagens de teste
+teste imgs/
+
+# Modelos YOLO
+*.pt
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Configurações locais
+.vscode/
