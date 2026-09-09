@@ -14,7 +14,7 @@ imagem = sys.argv[1]
 model = YOLO("runs/detect/train-ppe-50/weights/best.pt")
 
 #analiza a imagem
-results = model("barbudoSemCapacete.png")
+results = model(imagem)
 
 #pega o resultado
 resultado = results[0]
