@@ -1,0 +1,16 @@
+{
+    "alerta": true,
+    "tipo": "SEM_CAPACETE",
+    "quantidade": 1,
+    "pessoas": [
+        {
+            "confidence_percent": 76.7,
+            "box": {
+                "x1": 234.28586,
+                "y1": 74.04857,
+                "x2": 671.56409,
+                "y2": 442.00577
+            }
+        }
+    ]
+}

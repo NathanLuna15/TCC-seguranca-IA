@@ -92,3 +92,9 @@ TCC-Seguranca-IA/
 
 └── ...
 
+comandos da IA 
+Ativar Venv:   .venv\Scripts\activate
+
+Confirme onde está o seu modelo:   dir runs\detect\train-ppe-50\weights
+
+mandar imagem: python scripts/teste_json.py imagens/barbudoSemCapacete.png
