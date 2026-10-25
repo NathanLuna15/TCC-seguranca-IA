@@ -2,14 +2,16 @@
     "alerta": true,
     "tipo": "SEM_CAPACETE",
     "quantidade": 1,
-    "pessoas": [
+    "horario": "2026-10-24 21:09:37",
+    "ocorrencias": [
         {
-            "confidence_percent": 76.7,
+            "origem": "regra_pessoa_sem_capacete",
+            "confidence_percent": 66.9,
             "box": {
-                "x1": 234.28586,
-                "y1": 74.04857,
-                "x2": 671.56409,
-                "y2": 442.00577
+                "x1": 0.0,
+                "y1": 0.0,
+                "x2": 626.0034790039062,
+                "y2": 454.462158203125
             }
         }
     ]

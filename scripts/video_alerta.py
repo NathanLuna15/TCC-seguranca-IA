@@ -2,153 +2,138 @@ from ultralytics import YOLO
 import cv2
 import os
 import json
+import time
+import requests
 
 # ==============================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES (mexa só aqui)
 # ==============================
-
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Modelo treinado
-modelo_path = os.path.join(
-    BASE_DIR,
-    "runs",
-    "detect",
-    "train-ppe-50",
-    "weights",
-    "best.pt"
-)
+MODELO = os.path.join(BASE_DIR, "runs", "detect", "train", "weights", "best.pt")
 
-# Vídeo
-video_path = os.path.join(
-    BASE_DIR,
-    "video",
-    "machoMen.mp4"
-)
+# Vídeo: coloque o caminho. Câmera ao vivo: coloque 0
+FONTE = 0
 
-# Arquivo do alerta
-alerta_path = os.path.join(
-    BASE_DIR,
-    "resultados",
-    "alerta.json"
-)
+ALERTA_PATH = os.path.join(BASE_DIR, "resultados", "alerta.json")
+
+API_URL = "http://localhost:8080/v1/oroscorp/ia/alertas"   # troque pela rota do seu back-end
+
+CONF_MIN = 0.25            # confiança mínima das detecções
+CONF_PESSOA = 0.50         # só considera pessoa se tiver certeza
+FRAMES_PARA_ALERTA = 10    # quantos frames seguidos sem capacete para alertar
+SEGUNDOS_ENTRE_ALERTAS = 30  # evita mandar alerta repetido
 
 # ==============================
-# CARREGA MODELO
+# FUNÇÕES
 # ==============================
+def tem_capacete(pessoa, capacetes):
+    """Capacete conta se o centro dele está na parte de cima (cabeça) da pessoa."""
+    x1, y1, x2, y2 = pessoa
+    limite_cabeca = y1 + (y2 - y1) * 0.40
 
-model = YOLO(modelo_path)
+    for c in capacetes:
+        cx = (c[0] + c[2]) / 2
+        cy = (c[1] + c[3]) / 2
+        if x1 <= cx <= x2 and y1 <= cy <= limite_cabeca:
+            return True
+    return False
+
+
+def enviar_alerta(alerta):
+    # Salva o JSON no arquivo
+    with open(ALERTA_PATH, "w", encoding="utf-8") as f:
+        json.dump(alerta, f, indent=4, ensure_ascii=False)
+    print("ALERTA salvo em", ALERTA_PATH)
+
+    # Envia para o back-end
+    try:
+        resposta = requests.post(API_URL, json=alerta, timeout=5)
+        print("Back-end respondeu:", resposta.status_code)
+    except requests.exceptions.RequestException as erro:
+        print("Não consegui enviar o alerta:", erro)
+
 
 # ==============================
-# ABRE VÍDEO
+# EXECUÇÃO
 # ==============================
-
-video = cv2.VideoCapture(video_path)
+model = YOLO(MODELO)
+video = cv2.VideoCapture(FONTE)
 
 if not video.isOpened():
-    print("❌ Não foi possível abrir o vídeo.")
+    print(" Não foi possível abrir a fonte de vídeo.")
     exit()
 
-print("🎥 Analisando vídeo...")
+frames_seguidos = 0
+ultimo_alerta = 0
 
-# Evita vários alertas
-alerta_gerado = False
-
-# ==============================
-# PROCESSAMENTO
-# ==============================
+print("Analisando o video...")
 
 while True:
-
-    sucesso, frame = video.read()
-
-    if not sucesso:
+    ok, frame = video.read()
+    if not ok:
         break
 
+    resultado = model(frame, conf=CONF_MIN, verbose=False)[0]
 
-    # YOLO analisa o frame
-    resultado = model(frame, verbose=False)[0]
+    pessoas, capacetes, sem_capacete_modelo = [], [], []
 
     for i in range(len(resultado.boxes)):
-        classe = int(resultado.boxes.cls[i])
-        confidence = float(resultado.boxes.conf[i])
+        nome = model.names[int(resultado.boxes.cls[i])]
+        conf = float(resultado.boxes.conf[i])
+        box = resultado.boxes.xyxy[i].tolist()
 
-        print(
-            f"Detectado: {model.names[classe]} "
-            f"| confiança: {confidence:.2f}"
-        )
+        if nome == "Person" and conf >= CONF_PESSOA:
+            pessoas.append((box, conf))
+        elif nome == "helmet":
+            capacetes.append(box)
+        elif nome == "no_helmet":
+            sem_capacete_modelo.append((box, conf))
 
-    # Analisa todas as detecções
-    for i in range(len(resultado.boxes)):
+    # Pessoas sem capacete (regra) + no_helmet (se o modelo detectar)
+    infracoes = []
+    for box, conf in pessoas:
+        if not tem_capacete(box, capacetes):
+            infracoes.append({"origem": "regra_pessoa_sem_capacete",
+                              "confidence_percent": round(conf * 100, 1),
+                              "box": box})
+    for box, conf in sem_capacete_modelo:
+        infracoes.append({"origem": "classe_no_helmet",
+                          "confidence_percent": round(conf * 100, 1),
+                          "box": box})
 
-        classe = int(resultado.boxes.cls[i])
-        confidence = float(resultado.boxes.conf[i])
+    # Conta frames seguidos com infração
+    if infracoes:
+        frames_seguidos += 1
+    else:
+        frames_seguidos = 0
 
-        # Classe 7 = no_helmet
-        if classe == 7:
+    # Dispara o alerta
+    agora = time.time()
+    if (frames_seguidos >= FRAMES_PARA_ALERTA
+            and agora - ultimo_alerta > SEGUNDOS_ENTRE_ALERTAS):
+        alerta = {
+            "alerta": True,
+            "tipo": "SEM_CAPACETE",
+            "quantidade": len(infracoes),
+            "horario": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "ocorrencias": [
+                {"origem": i["origem"],
+                 "confidence_percent": i["confidence_percent"],
+                 "box": {"x1": i["box"][0], "y1": i["box"][1],
+                         "x2": i["box"][2], "y2": i["box"][3]}}
+                for i in infracoes
+            ],
+        }
+        enviar_alerta(alerta)
+        ultimo_alerta = agora
+        frames_seguidos = 0
 
-            # Gera apenas um alerta
-            if not alerta_gerado:
-
-                box = resultado.boxes.xyxy[i].tolist()
-
-                alerta = {
-                    "alerta": True,
-                    "tipo": "SEM_CAPACETE",
-                    "confidence_percent": round(
-                        confidence * 100,
-                        1
-                    ),
-                    "box": {
-                        "x1": box[0],
-                        "y1": box[1],
-                        "x2": box[2],
-                        "y2": box[3]
-                    }
-                }
-
-                # Salva JSON
-                with open(
-                    alerta_path,
-                    "w",
-                    encoding="utf-8"
-                ) as arquivo:
-
-                    json.dump(
-                        alerta,
-                        arquivo,
-                        indent=4,
-                        ensure_ascii=False
-                    )
-
-                print("🚨 ALERTA: Pessoa sem capacete!")
-                print(
-                    f"📊 Confiança: "
-                    f"{alerta['confidence_percent']}%"
-                )
-                print(
-                    f"📄 Arquivo: {alerta_path}"
-                )
-
-                alerta_gerado = True
-
-    # Mostra vídeo
-    frame_analisado = resultado.plot()
-
-    cv2.imshow(
-        "Sentinel Control - IA",
-        frame_analisado
-    )
-
-    # Aperte Q para sair
+    # Mostra o vídeo
+    cv2.imshow("Sentinel Control - IA", resultado.plot())
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
-# ==============================
-# FINALIZA
-# ==============================
-
 video.release()
 cv2.destroyAllWindows()
-
-print("✅ Análise do vídeo finalizada.")
+print(" Análise finalizada.")
